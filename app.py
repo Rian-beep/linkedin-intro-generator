@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import openai
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 st.set_page_config(page_title="LinkedIn Intro Generator")
 
