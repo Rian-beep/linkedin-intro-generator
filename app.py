@@ -1,60 +1,57 @@
 import streamlit as st
 import pandas as pd
 import openai
-import requests
-import time
+import io
 
-# --- Streamlit App Config ---
-st.set_page_config(page_title="LinkedIn Intro Generator", layout="centered")
-st.title("🧠 LinkedIn Intro Generator")
-st.markdown("Upload a CSV with a column named **'Personal Linkedin URL'**. This tool will generate a short personalized intro for each person.")
-
-# --- Set OpenAI API Key ---
+# --- Set up your OpenAI API key ---
 openai.api_key = st.secrets["OPENAI_API_KEY"]
 
-# --- Upload CSV ---
-uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+# --- UI Layout ---
+st.set_page_config(page_title="Intro Generator", layout="centered")
+st.title("🧠 LinkedIn Personalised Intro Generator")
+st.write("Upload a CSV with a 'Personal Linkedin URL' column. The tool will generate short, personalized intros to use in outreach.")
 
+# --- Upload CSV ---
+uploaded_file = st.file_uploader("Upload your contact list", type=["csv"])
+
+# --- Generate intro for a single row ---
+def generate_intro(linkedin_url):
+    prompt = f"""
+You are helping a B2B event organiser write short, personalized email intros to executives. 
+You're provided with the LinkedIn URL: {linkedin_url}
+
+Write a short, professional and personalized intro (1–2 sentences max) that mentions something about their background, experience, or company. This intro will be used as the opening line in an email inviting them to a private executive event relevant to their field.
+"""
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        return f"Error: {e}"
+
+# --- Generate intros and allow download ---
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
 
-    if 'Personal Linkedin URL' not in df.columns:
-        st.error("❌ Your file must contain a column named 'Personal Linkedin URL'.")
+    if "Personal Linkedin URL" not in df.columns:
+        st.error("❌ The uploaded file must contain a column called 'Personal Linkedin URL'")
     else:
-        intros = []
-        with st.spinner("Generating intros..."):
-            for url in df['Personal Linkedin URL']:
-                if pd.isna(url) or not str(url).startswith("http"):
-                    intros.append("No valid LinkedIn URL provided.")
-                    continue
+        if st.button("🔍 Generate Intros"):
+            with st.spinner("Generating intros..."):
+                df["Personalised Intro"] = df["Personal Linkedin URL"].apply(generate_intro)
 
-                prompt = f"Write a short 1–2 sentence personalized intro to this person based on their LinkedIn profile: {url}"
+            st.success("✅ Intros generated!")
+            st.dataframe(df.head(10))
 
-                try:
-                    response = openai.ChatCompletion.create(
-                        model="gpt-4",
-                        messages=[
-                            {"role": "system", "content": "You are an expert at summarizing professional profiles in a concise and friendly way."},
-                            {"role": "user", "content": prompt},
-                        ],
-                        temperature=0.7,
-                        max_tokens=100,
-                    )
-                    intro = response.choices[0].message.content.strip()
-                except Exception as e:
-                    intro = f"Error: {str(e)}"
+            # Download
+            csv = df.to_csv(index=False).encode("utf-8-sig")
+            st.download_button(
+                label="📥 Download CSV with Intros",
+                data=csv,
+                file_name="contacts_with_intros.csv",
+                mime="text/csv",
+            )
 
-                intros.append(intro)
-                time.sleep(1.2)  # Optional delay to avoid hitting rate limits
-
-        df['Personalised Intro'] = intros
-
-        st.success("✅ Intros generated!")
-        st.dataframe(df.head())
-
-        st.download_button(
-            label="📥 Download with Intros",
-            data=df.to_csv(index=False).encode("utf-8-sig"),
-            file_name="linkedin_intros.csv",
-            mime="text/csv"
-        )
