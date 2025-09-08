@@ -6,41 +6,38 @@ from io import BytesIO
 
 # --- Streamlit Page Setup ---
 st.set_page_config(page_title="AI Intro Generator", layout="centered")
-
 st.title("🎯 Executive Intro Generator")
-st.markdown("Upload a CSV file with these columns: **First Name**, **Last Name**, **Company**, **Email**, **Title**, and **Professional Background**.\n\nWe'll generate a short personalized intro for each person to help you run high-impact outreach.")
+st.markdown("Upload a CSV with executive contact details and generate personalized cold email intros tailored to your event.")
 
-# --- Set your OpenAI API Key (via Secrets or Env Variable) ---
+# --- Set your OpenAI API Key ---
 openai.api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
 
-# --- File Uploader ---
-uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+# --- Prompt Template ---
+def generate_prompt(row, event_topics):
+    return f"""You are a helpful assistant helping write short intros for cold emails to executives.
 
-# --- Prompt Generator ---
-def generate_prompt(row):
-    return f"""
-You are writing a short cold outreach intro for an email.
-
-Here is the recipient's info:
-- Name: {row.get('First Name', '')} {row.get('Last Name', '')}
-- Job Title: {row.get('Title', '')}
+Here is the contact's background:
+- First Name: {row.get('First Name', '')}
+- Last Name: {row.get('Last Name', '')}
+- Title: {row.get('Title', '')}
 - Company: {row.get('Company', '')}
 - Email: {row.get('Email', '')}
 - Background: {row.get('Professional Background', '')}
 
-Write a 1–2 sentence personalized intro to invite them to a private executive event with other {row.get('Title', '').split()[0] if row.get('Title') else 'executives'}. 
-Mention something from their background that would make them a good fit. Be friendly and insightful.
-Don't include greetings like 'Hi' or 'Dear'.
+They are being invited to a private executive roundtable event. The topics of the event include: {event_topics}.
+
+Write a short 1–2 sentence personalized introduction for why we're reaching out. Mention something relevant from their background or role and tie it into the event themes.
+
+Use a warm, professional tone. Do not include greetings like 'Hi' or 'Dear'—just the intro paragraph.
 """
 
-# --- Generate Intros ---
-def generate_intro(row):
+def generate_intro(row, event_topics):
     try:
         response = openai.chat.completions.create(
             model="gpt-4-turbo",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant who writes short intros for cold outreach emails."},
-                {"role": "user", "content": generate_prompt(row)}
+                {"role": "user", "content": generate_prompt(row, event_topics)}
             ],
             temperature=0.7,
             max_tokens=100,
@@ -49,31 +46,34 @@ def generate_intro(row):
     except Exception as e:
         return f"Error: {e}"
 
-# --- Main Logic ---
+# --- Upload CSV ---
+uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
 
-    required_cols = ["First Name", "Last Name", "Company", "Email", "Title", "Professional Background"]
-    missing_cols = [col for col in required_cols if col not in df.columns]
-
-    if missing_cols:
-        st.error(f"❌ Missing columns: {', '.join(missing_cols)}")
+    required_columns = ['First Name', 'Last Name', 'Company', 'Email', 'Title', 'Professional Background']
+    if not all(col in df.columns for col in required_columns):
+        st.error(f"❌ Your CSV must contain these columns: {', '.join(required_columns)}")
     else:
-        st.info("Generating intros... This may take a moment ⏳")
+        st.markdown("### ✍️ Event Topics")
+        event_topics = st.text_area("List the topics of your event", placeholder="e.g. AI in sales, revenue operations, driving pipeline efficiency...")
 
-        df["Personalised Intro"] = df.apply(generate_intro, axis=1)
+        if event_topics:
+            if st.button("🚀 Generate Intros"):
+                st.info("Generating intros... This may take a moment ⏳")
 
-        st.success("✅ Done! Download your enriched CSV below.")
+                df["Personalised Intro"] = df.apply(lambda row: generate_intro(row, event_topics), axis=1)
 
-        # Display preview
-        st.dataframe(df.head(10))
+                st.success("✅ Done! Download your enriched CSV below.")
+                st.dataframe(df.head(10))
 
-        # Download button
-        output = BytesIO()
-        df.to_csv(output, index=False)
-        st.download_button(
-            label="📥 Download CSV with Intros",
-            data=output.getvalue(),
-            file_name="intros_with_personalisation.csv",
-            mime="text/csv"
-        )
+                output = BytesIO()
+                df.to_csv(output, index=False)
+                st.download_button(
+                    label="📥 Download CSV with Intros",
+                    data=output.getvalue(),
+                    file_name="intros_with_personalisation.csv",
+                    mime="text/csv"
+                )
+
