@@ -8,68 +8,78 @@ from io import BytesIO
 st.set_page_config(page_title="AI Intro Generator", layout="centered")
 
 st.title("🎯 Executive Intro Generator")
-st.markdown("Upload a CSV with columns for **First Name**, **Last Name**, **Job Title**, **Company**, and **Company Description**.")
+st.markdown("Upload a Cognism CSV file and generate a personalized intro for each contact based on job title, company name, and company description.")
 
-# --- Set your OpenAI API Key ---
+# --- OpenAI API Key ---
 openai.api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
 
-# --- Event Topics & Toggle ---
-st.markdown("### 🎯 Event Topics")
-event_topics = st.text_area("Add key topics for the event (comma-separated)")
+# --- Topic Entry and AWS Toggle ---
+st.markdown("### ✍️ Event Topics")
+topics_input = st.text_area("Enter 5 topics for the event (separate by commas)", placeholder="AI, Automation, CX, Revenue Growth, Cloud")
 is_aws_event = st.toggle("Is this an AWS Event?", value=False)
 
-# --- File Upload ---
-uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+# --- File Uploader ---
+uploaded_file = st.file_uploader("Upload Cognism CSV", type=["csv"])
 
-# --- Prompt Generator ---
-def generate_prompt(row, topics):
-    job = row.get("Job Title", "").strip()
-    company = row.get("Company Name", "").strip()
-    description = row.get("Company Description", "").strip()
-
-    intro_context = (
-        f"You are helping write a short intro paragraph for a cold email invite to a private executive event.\n"
-        f"Write 1–2 short paragraphs introducing the event to someone who is a {job} at {company}.\n"
-        f"Use something relevant from their company description: {description}\n"
-        f"Only mention 1 or 2 of these topics if relevant: {topics}.\n"
-    )
+# --- Prompt Template ---
+def generate_prompt(first, last, company, title, company_desc, topics):
+    topics_list = [t.strip() for t in topics.split(',') if t.strip()]
+    selected_topics = ", ".join(topics_list[:2]) if topics_list else "key challenges"
 
     if is_aws_event:
-        intro_context += "Make it clear AWS is inviting them."
+        intro_line = f"AWS would like you to join a select group of peers."
     else:
-        intro_context += "Write it in the voice of a warm, curious peer extending a personal invite."
+        intro_line = f"We're reaching out to invite you to a private executive event."
 
-    return intro_context
+    prompt = f"""
+You are a helpful assistant who writes short, personalized intros for cold outreach emails.
 
-# --- Generate Intro Function ---
-def generate_intro(row, topics):
+Write a short two-line (two-paragraph) intro to invite {first} {last}, {title} at {company}, to an exclusive event.
+Use this company description for context: "{company_desc}".
+The event will cover topics such as {selected_topics}.
+{intro_line}
+Avoid greetings like 'Hi' or 'Dear'. Keep it warm and professional.
+"""
+    return prompt
+
+# --- Generate Intros ---
+def generate_intro(row):
     try:
+        prompt = generate_prompt(
+            row.get("First Name", ""),
+            row.get("Last Name", ""),
+            row.get("Company Name", ""),
+            row.get("Job Title", ""),
+            row.get("Company Description", ""),
+            topics_input
+        )
+
         response = openai.chat.completions.create(
             model="gpt-4-turbo",
             messages=[
-                {"role": "system", "content": "You write short, thoughtful email intros for executive invites."},
-                {"role": "user", "content": generate_prompt(row, topics)}
+                {"role": "system", "content": "You are a helpful assistant who writes short intros for cold outreach emails."},
+                {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=150
+            max_tokens=150,
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
         return f"Error: {e}"
 
-# --- Generate Intros ---
+# --- Main Logic ---
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
 
-    required_cols = ["First Name", "Last Name", "Job Title", "Company", "Company Description"]
+    required_cols = ["First Name", "Last Name", "Company Name", "Job Title", "Company Description"]
     missing_cols = [col for col in required_cols if col not in df.columns]
 
     if missing_cols:
-        st.error(f"❌ Missing required columns: {', '.join(missing_cols)}")
+        st.error(f"❌ Missing columns in CSV: {', '.join(missing_cols)}")
     else:
         if st.button("🚀 Generate Intros"):
             st.info("Generating intros... This may take a moment ⏳")
-            df["Personalised Intro"] = df.apply(lambda row: generate_intro(row, event_topics), axis=1)
+            df["Personalised Intro"] = df.apply(generate_intro, axis=1)
 
             st.success("✅ Done! Download your enriched CSV below.")
             st.dataframe(df.head(10))
@@ -82,4 +92,3 @@ if uploaded_file:
                 file_name="intros_with_personalisation.csv",
                 mime="text/csv"
             )
-
