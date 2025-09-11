@@ -8,47 +8,57 @@ from io import BytesIO
 st.set_page_config(page_title="AI Intro Generator", layout="centered")
 
 st.title("🎯 Executive Intro Generator")
-st.markdown("Upload a CSV file with columns like **First Name, Last Name, Company Name, Job Title, Company Description** to generate a short, personalized intro for each person.")
+st.markdown("Upload a CSV with relevant contact info and get a personalized intro for each person.")
 
-# --- Set your OpenAI API Key (replace or use env variable) ---
+# --- API Key Setup ---
 openai.api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
-
-# --- Event Context Input ---
-st.markdown("### 🎯 Event Context")
-event_topics = st.text_area("List the key topics of the event (comma-separated):", placeholder="e.g. IT, Endpoint Management, Cybersecurity")
-is_aws_event = st.toggle("Is this an AWS-sponsored event?", value=False)
 
 # --- File Uploader ---
 uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
 
-# --- Prompt Generator ---
-def generate_prompt(row, topics, aws_event):
-    job_title = row.get("Job Title", "")
-    company = row.get("Company Name", "")
-    description = row.get("Company Description", "")
+# --- Event Topics + Toggle ---
+st.markdown("### 📝 Event Customization")
+topics = st.text_area("Enter key topics for the event (comma separated)",
+                      placeholder="cloud security, AI in operations, cost optimization")
+is_aws_event = st.toggle("Is this an AWS-hosted event?", value=False)
+
+generate_button = st.button("✨ Generate Intros")
+
+# --- Prompt Builder ---
+def build_prompt(row, topics, is_aws):
+    name = f"{row['First Name']} {row['Last Name']}"
+    title = row.get("Job Title", "").strip()
+    company = row.get("Company Name", "").strip()
+    description = row.get("Company Description", "").strip()
+
     topic_list = [t.strip() for t in topics.split(",") if t.strip()]
-    selected_topics = ", ".join(topic_list[:2]) if topic_list else "key industry challenges"
+    topic_snippet = ""
+    if topic_list:
+        chosen = topic_list[:2]
+        topic_snippet = f"focusing on {', '.join(chosen)}"
 
-    if aws_event:
-        return f"""
-I hope this message finds you well.
-AWS would like to invite you to a private executive event. Your role in {job_title} at {company}, particularly your work in {description}, aligns strongly with our focus on {selected_topics}.
-"""
+    opening_line = "I hope this message finds you well."
+
+    if is_aws:
+        second_line = (
+            f"As a {title.lower()} at {company}, your work in {description.lower()} caught AWS's attention. "
+            f"They’d love for you to join a select group of leaders for a private event {topic_snippet}."
+        )
     else:
-        return f"""
-I hope this message finds you well.
-As a leader in {job_title} at {company}, your work in {description} aligns perfectly with the themes of our upcoming executive event, particularly around {selected_topics}.
-"""
+        second_line = (
+            f"As a {title.lower()} at {company}, your work in {description.lower()} aligns perfectly with the themes of our upcoming executive event {topic_snippet}."
+        )
 
-# --- Generate Intro Using OpenAI ---
-def generate_intro(row, topics, aws_event):
+    return f"{opening_line}\n\n{second_line}".strip()
+
+# --- OpenAI Call ---
+def generate_intro_from_prompt(prompt):
     try:
-        prompt = generate_prompt(row, topics, aws_event)
         response = openai.chat.completions.create(
             model="gpt-4-turbo",
             messages=[
-                {"role": "system", "content": "You are a helpful assistant who writes short, professional cold outreach intros."},
-                {"role": "user", "content": prompt.strip()}
+                {"role": "system", "content": "You write short, 2-sentence cold email intros for executives."},
+                {"role": "user", "content": prompt}
             ],
             temperature=0.7,
             max_tokens=100,
@@ -57,34 +67,25 @@ def generate_intro(row, topics, aws_event):
     except Exception as e:
         return f"Error: {e}"
 
-# --- Main Logic ---
-if uploaded_file:
+# --- Main ---
+if uploaded_file and generate_button:
     df = pd.read_csv(uploaded_file)
 
-    required_cols = ["Job Title", "Company Name", "Company Description"]
-    missing_cols = [col for col in required_cols if col not in df.columns]
-
-    if missing_cols:
-        st.error(f"❌ Missing required columns: {', '.join(missing_cols)}")
+    required_cols = ["First Name", "Last Name", "Company Name", "Job Title", "Company Description"]
+    if not all(col in df.columns for col in required_cols):
+        st.error(f"❌ The CSV must include the following columns: {', '.join(required_cols)}")
     else:
-        if not event_topics.strip():
-            st.warning("✏️ Please enter some event topics before generating intros.")
-        else:
-            if st.button("🚀 Generate Personalised Intros"):
-                st.info("Generating intros... This may take a moment ⏳")
-                df["Personalised Intro"] = df.apply(lambda row: generate_intro(row, event_topics, is_aws_event), axis=1)
+        st.info("Generating personalized intros... ⏳")
+        df["Personalised Intro"] = df.apply(lambda row: build_prompt(row, topics, is_aws_event), axis=1)
 
-                st.success("✅ Done! Download your enriched CSV below.")
+        st.success("✅ Done! Preview below and download your file.")
+        st.dataframe(df.head(10))
 
-                # Display preview
-                st.dataframe(df.head(10))
-
-                # Download button
-                output = BytesIO()
-                df.to_csv(output, index=False)
-                st.download_button(
-                    label="📥 Download CSV with Intros",
-                    data=output.getvalue(),
-                    file_name="intros_with_personalisation.csv",
-                    mime="text/csv"
-                )
+        output = BytesIO()
+        df.to_csv(output, index=False)
+        st.download_button(
+            label="📥 Download CSV with Intros",
+            data=output.getvalue(),
+            file_name="executive_intros.csv",
+            mime="text/csv"
+        )
