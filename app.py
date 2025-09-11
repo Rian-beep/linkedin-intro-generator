@@ -24,7 +24,7 @@ uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
 # --- Prompt Generator ---
 def generate_prompt(row, topics):
     job = row.get("Job Title", "").strip()
-    company = row.get("Company", "").strip()
+    company = row.get("Company Name", "").strip()
     description = row.get("Company Description", "").strip()
 
     intro_context = (
