@@ -8,46 +8,46 @@ from io import BytesIO
 st.set_page_config(page_title="AI Intro Generator", layout="centered")
 
 st.title("🎯 Executive Intro Generator")
-st.markdown("Upload a CSV with fields like **First Name**, **Last Name**, **Job Title**, **Company**, and **Company Description**. This tool will generate a short, professional intro for each contact to use in email outreach.")
+st.markdown("Upload a CSV with executive data and generate short, personalized intros for outreach emails.")
 
-# --- Set your OpenAI API Key ---
+# --- OpenAI API Key ---
 openai.api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY"))
 
-# --- File Upload and Topics Input ---
+# --- File Uploader ---
 uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
-event_topics = st.text_area("🔍 Event Topics (1 per line, max 5)", placeholder="Example: IT Management\nEndpoint Security\nCloud Strategy")
-is_aws_event = st.toggle("Is this an AWS Event?", value=False)
 
-def generate_prompt(first_name, last_name, title, company, company_desc, topics, is_aws):
-    topic_list = [t.strip() for t in topics.splitlines() if t.strip()][:5]
-    topic_text = ", ".join(topic_list)
-    invitation = (
-        "AWS would like to invite you to join a select group of peers"
-        if is_aws else
-        "We’re inviting you to a private executive event"
-    )
+# --- Event Topics Input ---
+st.markdown("### 🧠 Event Topics")
+topics = st.text_area("Enter 3–5 event topics (comma-separated)", "IT Management, Endpoint Management, Security, Automation, Cloud Strategy")
+is_aws_event = st.toggle("Is this an AWS-hosted event?")
 
-    return f"""
-You are a helpful assistant writing short, professional email intros for executive outreach. 
-Each intro must follow this strict format:
+# --- Prompt Generator ---
+def generate_prompt(first_name, last_name, job_title, company_name, company_description, topics, is_aws):
+    return f"""You are a helpful assistant writing short, factual, personalized intros for cold email invitations to executives.
 
-- Two short, clear sentences.
-- Do **not** mention the person’s name.
-- Do **not** use greetings like “Hi” or “Dear”.
-- The first sentence should start: “I hope this message finds you well.”
-- The second sentence should reference their job title, company, and company description, rewritten into a clear and accurate English sentence (even if the original was messy or in another language).
-- Only mention 1–2 relevant topics from this list that match their role: {topic_text}.
-- The tone must be professional, warm, and factually accurate.
-- Do **not** make up or assume anything not in the input.
+Here is the information available:
 
-Here is the input:
-Job Title: {title}
-Company: {company}
-Company Description: {company_desc}
+First Name: {first_name}
+Last Name: {last_name}
+Job Title: {job_title}
+Company: {company_name}
+Company Description: {company_description}
 
-Write the intro in English:
-"""
+The intro should be 1–2 professional sentences, broken into 2 short paragraphs for readability.
 
+Do not mention the person’s name. Do not include any invented information. Use the company description only to help understand their role and context — don’t reference the company in the message.
+
+Reference only 1 or 2 of the following event topics if relevant: {topics}
+
+{'AWS would like to invite you to join...' if is_aws else 'We are inviting you to join...'}
+
+Use a warm, professional tone. Here's an example of the format and tone:
+
+\"I hope this message finds you well. As a leader in cybersecurity and IT operations at Grupo AG, your expertise in overseeing complex and innovative IT environments aligns perfectly with the themes of our upcoming executive event, focusing on IT and Endpoint Management.\"
+
+Now write the intro:"""
+
+# --- Intro Generator ---
 def generate_intro(row):
     try:
         prompt = generate_prompt(
@@ -56,9 +56,10 @@ def generate_intro(row):
             row.get("Job Title", ""),
             row.get("Company Name", ""),
             row.get("Company Description", ""),
-            event_topics,
+            topics,
             is_aws_event
         )
+
         response = openai.chat.completions.create(
             model="gpt-4-turbo",
             messages=[
@@ -66,23 +67,25 @@ def generate_intro(row):
                 {"role": "user", "content": prompt}
             ],
             temperature=0.7,
-            max_tokens=150,
+            max_tokens=100
         )
+
         return response.choices[0].message.content.strip()
     except Exception as e:
         return f"Error: {e}"
 
-# --- Main Logic ---
+# --- Generate Intros ---
 if uploaded_file:
     df = pd.read_csv(uploaded_file)
-    required_cols = ["First Name", "Last Name", "Job Title", "Company Name", "Company Description"]
-    if not all(col in df.columns for col in required_cols):
-        st.error(f"❌ Missing one or more required columns: {', '.join(required_cols)}")
-    elif not event_topics.strip():
-        st.warning("⚠️ Please enter 1–5 event topics to generate relevant intros.")
+
+    required_columns = ["First Name", "Last Name", "Job Title", "Company Name", "Company Description"]
+    missing_columns = [col for col in required_columns if col not in df.columns]
+
+    if missing_columns:
+        st.error(f"❌ Missing required columns: {', '.join(missing_columns)}")
     else:
-        if st.button("✨ Generate Intros"):
-            st.info("Generating intros... This may take a moment ⏳")
+        if st.button("🚀 Generate Intros"):
+            st.info("Generating personalized intros... This may take a moment ⏳")
             df["Personalised Intro"] = df.apply(generate_intro, axis=1)
 
             st.success("✅ Done! Download your enriched CSV below.")
@@ -96,4 +99,3 @@ if uploaded_file:
                 file_name="intros_with_personalisation.csv",
                 mime="text/csv"
             )
-
